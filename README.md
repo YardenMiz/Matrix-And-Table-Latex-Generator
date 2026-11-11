@@ -49,6 +49,8 @@ Needs `amsmath` for matrices.
 | Enter | Copy the LaTeX and close |
 | Esc | Close without copying |
 | Alt+M / Alt+T | Switch to Matrix / Table mode |
+| Alt+B | Next bracket type (matrix mode); Alt+Shift+B goes back |
+| / | In an empty table cell: jump to the caption. Esc or Tab goes back to that cell, Enter copies. Elsewhere `/` is typed normally (matrix fractions, `km/h`) |
 | Alt+R / Alt+C | Jump to the Rows / Cols field. Type a number or use ↑/↓, then Enter, Tab or Esc to return to the grid |
 
 The Alt shortcuts follow the physical key, so they also work while the keyboard is on another

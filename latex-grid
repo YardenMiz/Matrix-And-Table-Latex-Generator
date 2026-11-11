@@ -70,7 +70,8 @@ class Popup(Gtk.Window):
 
         # --- options ---
         self.matrix_opts = Gtk.Box(spacing=6)
-        self.matrix_opts.pack_start(Gtk.Label(label="Brackets"), False, False, 0)
+        brackets_label = Gtk.Label.new_with_mnemonic("_Brackets")  # Alt+B cycles (on_window_key)
+        self.matrix_opts.pack_start(brackets_label, False, False, 0)
         self.bracket = Gtk.ComboBoxText()
         for env in MATRIX_ENVS:
             self.bracket.append(env, BRACKETS[env])
@@ -90,6 +91,7 @@ class Popup(Gtk.Window):
         self.table_opts.pack_start(Gtk.Label(label="Caption"), False, False, 0)
         self.caption = Gtk.Entry(width_chars=16)
         self.caption.connect("activate", lambda *_: self.finish())
+        self.caption.connect("key-press-event", self.on_caption_key)
         self.table_opts.pack_start(self.caption, True, True, 0)
         box.pack_start(self.table_opts, False, False, 0)
 
@@ -101,6 +103,7 @@ class Popup(Gtk.Window):
         hint = Gtk.Label()
         hint.set_markup(
             "<small>Tab: next cell · Alt+M / Alt+T: matrix / table · Alt+R / Alt+C: rows / cols\n"
+            "Alt+B: next bracket · /: caption (table) · "
             "Enter: copy LaTeX · Esc: cancel</small>"
         )
         hint.get_style_context().add_class("dim-label")
@@ -220,12 +223,44 @@ class Popup(Gtk.Window):
                 self.rows.grab_focus()
             elif k == Gdk.KEY_c:
                 self.cols.grab_focus()
+            elif k == Gdk.KEY_b and self.is_matrix():
+                # next bracket type; Alt+Shift+B goes back
+                step = -1 if event.state & Gdk.ModifierType.SHIFT_MASK else 1
+                i = MATRIX_ENVS.index(self.bracket.get_active_id())
+                self.bracket.set_active_id(MATRIX_ENVS[(i + step) % len(MATRIX_ENVS)])
             else:
                 return False
             return True
-        # Esc in a size field only returns to the grid (on_spin_key), not cancel.
-        if event.keyval == Gdk.KEY_Escape and self.get_focus() not in (self.rows, self.cols):
+        focus = self.get_focus()
+        # "/" in an empty table cell jumps to the caption (vim-style). In matrix mode,
+        # or in a cell that already has text, "/" is typed normally (fractions, km/h).
+        if (
+            not self.is_matrix()
+            and not event.state & (Gdk.ModifierType.CONTROL_MASK | Gdk.ModifierType.MOD1_MASK)
+            and (event.keyval == Gdk.KEY_slash or self.latin_key(event) == Gdk.KEY_slash)
+            and isinstance(focus, Gtk.Entry)
+            and focus in self.cells()
+            and not focus.get_text()
+        ):
+            self.caption_from = focus
+            self.caption.grab_focus()
+            return True
+        # Esc in a size field or the caption only returns to the grid, not cancel.
+        if event.keyval == Gdk.KEY_Escape and focus not in (self.rows, self.cols, self.caption):
             Gtk.main_quit()
+            return True
+        return False
+
+    def cells(self):
+        return [e for row in self.entries for e in row]
+
+    def on_caption_key(self, entry, event):
+        if event.keyval in (Gdk.KEY_Escape, Gdk.KEY_Tab, Gdk.KEY_ISO_Left_Tab):
+            back = getattr(self, "caption_from", None)
+            if back in self.cells():
+                back.grab_focus()
+            else:
+                self.focus_cell(0, 0)
             return True
         return False
 
