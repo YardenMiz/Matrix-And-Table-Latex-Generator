@@ -48,7 +48,11 @@ Needs `amsmath` for matrices.
 | ↑ / ↓ | Cell above / below |
 | Enter | Copy the LaTeX and close |
 | Esc | Close without copying |
+| Alt+M / Alt+T | Switch to Matrix / Table mode |
 | Alt+R / Alt+C | Jump to the Rows / Cols field. Type a number or use ↑/↓, then Enter, Tab or Esc to return to the grid |
+
+The Alt shortcuts follow the physical key, so they also work while the keyboard is on another
+layout (for example Hebrew).
 
 Paste tab-separated text (for example cells copied from a spreadsheet) into any cell and it
 spreads over the grid from there, growing the grid if needed.

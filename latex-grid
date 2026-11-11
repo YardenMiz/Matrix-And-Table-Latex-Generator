@@ -49,8 +49,9 @@ class Popup(Gtk.Window):
 
         # --- top row: mode + size ---
         top = Gtk.Box(spacing=6)
-        self.rb_matrix = Gtk.RadioButton.new_with_label(None, "Matrix")
-        self.rb_table = Gtk.RadioButton.new_with_label_from_widget(self.rb_matrix, "Table")
+        # Alt+M / Alt+T switch mode (mnemonics)
+        self.rb_matrix = Gtk.RadioButton.new_with_mnemonic(None, "_Matrix")
+        self.rb_table = Gtk.RadioButton.new_with_mnemonic_from_widget(self.rb_matrix, "_Table")
         for w in (self.rb_matrix, self.rb_table):
             w.set_mode(False)  # look like toggle buttons
             w.set_can_focus(False)
@@ -99,7 +100,8 @@ class Popup(Gtk.Window):
 
         hint = Gtk.Label()
         hint.set_markup(
-            "<small>Tab: next cell · Alt+R / Alt+C: rows / cols · Enter: copy LaTeX · Esc: cancel</small>"
+            "<small>Tab: next cell · Alt+M / Alt+T: matrix / table · Alt+R / Alt+C: rows / cols\n"
+            "Enter: copy LaTeX · Esc: cancel</small>"
         )
         hint.get_style_context().add_class("dim-label")
         box.pack_start(hint, False, False, 0)
@@ -197,9 +199,31 @@ class Popup(Gtk.Window):
             return True
         return False
 
+    def latin_key(self, event):
+        """The key's letter on the first (usually English) layout, so Alt+M etc.
+        also work while typing with a Hebrew layout."""
+        keymap = Gdk.Keymap.get_for_display(self.get_display())
+        ok, keyval, *_ = keymap.translate_keyboard_state(
+            event.hardware_keycode, Gdk.ModifierType(0), 0
+        )
+        return Gdk.keyval_to_lower(keyval if ok else event.keyval)
+
     def on_window_key(self, _w, event):
-        # The window sees keys before the focused widget: Esc in a size field
-        # should only return to the grid (on_spin_key), not cancel.
+        # The window sees keys before the focused widget.
+        if event.state & Gdk.ModifierType.MOD1_MASK:
+            k = self.latin_key(event)
+            if k == Gdk.KEY_m:
+                self.rb_matrix.set_active(True)  # toggled -> set_mode() refocuses the grid
+            elif k == Gdk.KEY_t:
+                self.rb_table.set_active(True)
+            elif k == Gdk.KEY_r:
+                self.rows.grab_focus()
+            elif k == Gdk.KEY_c:
+                self.cols.grab_focus()
+            else:
+                return False
+            return True
+        # Esc in a size field only returns to the grid (on_spin_key), not cancel.
         if event.keyval == Gdk.KEY_Escape and self.get_focus() not in (self.rows, self.cols):
             Gtk.main_quit()
             return True
