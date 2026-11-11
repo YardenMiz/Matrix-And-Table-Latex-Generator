@@ -1,4 +1,3 @@
-<<<<<<< HEAD
 # latex-grid
 
 A tiny popup for Linux (GTK 3) that turns a grid you type into LaTeX and copies it to the clipboard.
@@ -49,6 +48,7 @@ Needs `amsmath` for matrices.
 | ↑ / ↓ | Cell above / below |
 | Enter | Copy the LaTeX and close |
 | Esc | Close without copying |
+| Alt+R / Alt+C | Jump to the Rows / Cols field. Type a number or use ↑/↓, then Enter, Tab or Esc to return to the grid |
 
 Paste tab-separated text (for example cells copied from a spreadsheet) into any cell and it
 spreads over the grid from there, growing the grid if needed.
@@ -87,7 +87,3 @@ The matrix behaviour (`pmatrix`/`bmatrix`, `a/b` → `\frac`) is inspired by
 [jasonwarta/latex-matrix](https://github.com/jasonwarta/latex-matrix). No code was copied
 from it. The table output follows the full-grid style of
 [tablesgenerator.com](https://www.tablesgenerator.com/).
-=======
-# Matrix-And-Table-Latex-Generator
-A Repo for handy matrix and table generation in Latex
->>>>>>> de258e42daa89c177c047e157d5b3d0e0199eedf
