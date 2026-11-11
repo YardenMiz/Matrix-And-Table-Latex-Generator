@@ -1,0 +1,226 @@
+#!/usr/bin/env python3
+"""Small popup: fill a grid, press Enter, get a LaTeX matrix or table on the clipboard.
+
+Usage: latex-grid [--matrix | --table]
+Keys:  Tab / Shift+Tab move between cells, Enter copies and closes, Esc cancels.
+"""
+import os
+import sys
+
+sys.path.insert(0, os.path.dirname(os.path.realpath(__file__)))
+
+import gi
+
+gi.require_version("Gtk", "3.0")
+gi.require_version("Gdk", "3.0")
+from gi.repository import Gdk, GLib, Gtk  # noqa: E402
+
+from latexgrid import MATRIX_ENVS, matrix_latex, parse_block, table_latex  # noqa: E402
+
+BRACKETS = {
+    "pmatrix": "( )  pmatrix",
+    "bmatrix": "[ ]  bmatrix",
+    "vmatrix": "| |  vmatrix",
+    "Bmatrix": "{ }  Bmatrix",
+    "matrix": "none  matrix",
+}
+ALIGNS = {"l": "Left", "c": "Centre", "r": "Right"}
+MAX = 12
+
+
+class Popup(Gtk.Window):
+    def __init__(self, mode):
+        super().__init__(title="LaTeX grid")
+        self.set_default_direction(Gtk.TextDirection.LTR)
+        self.set_type_hint(Gdk.WindowTypeHint.DIALOG)
+        self.set_keep_above(True)
+        self.set_position(Gtk.WindowPosition.MOUSE)
+        self.set_resizable(False)
+        self.set_border_width(10)
+        self.connect("destroy", Gtk.main_quit)
+        self.connect("key-press-event", self.on_window_key)
+
+        self.entries = []  # entries[r][c]
+        self.values = {}  # (r, c) -> text, kept across resizes
+        self.filling = False
+
+        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
+        self.add(box)
+
+        # --- top row: mode + size ---
+        top = Gtk.Box(spacing=6)
+        self.rb_matrix = Gtk.RadioButton.new_with_label(None, "Matrix")
+        self.rb_table = Gtk.RadioButton.new_with_label_from_widget(self.rb_matrix, "Table")
+        for w in (self.rb_matrix, self.rb_table):
+            w.set_mode(False)  # look like toggle buttons
+            w.set_can_focus(False)
+            top.pack_start(w, False, False, 0)
+        top.pack_start(Gtk.Label(label="   Rows"), False, False, 0)
+        self.rows = Gtk.SpinButton.new_with_range(1, MAX, 1)
+        top.pack_start(self.rows, False, False, 0)
+        top.pack_start(Gtk.Label(label="Cols"), False, False, 0)
+        self.cols = Gtk.SpinButton.new_with_range(1, MAX, 1)
+        top.pack_start(self.cols, False, False, 0)
+        for s in (self.rows, self.cols):
+            s.set_can_focus(False)
+        box.pack_start(top, False, False, 0)
+
+        # --- options ---
+        self.matrix_opts = Gtk.Box(spacing=6)
+        self.matrix_opts.pack_start(Gtk.Label(label="Brackets"), False, False, 0)
+        self.bracket = Gtk.ComboBoxText()
+        for env in MATRIX_ENVS:
+            self.bracket.append(env, BRACKETS[env])
+        self.bracket.set_active_id("pmatrix")
+        self.bracket.set_can_focus(False)
+        self.matrix_opts.pack_start(self.bracket, False, False, 0)
+        box.pack_start(self.matrix_opts, False, False, 0)
+
+        self.table_opts = Gtk.Box(spacing=6)
+        self.table_opts.pack_start(Gtk.Label(label="Align"), False, False, 0)
+        self.align = Gtk.ComboBoxText()
+        for k, v in ALIGNS.items():
+            self.align.append(k, v)
+        self.align.set_active_id("l")
+        self.align.set_can_focus(False)
+        self.table_opts.pack_start(self.align, False, False, 0)
+        self.table_opts.pack_start(Gtk.Label(label="Caption"), False, False, 0)
+        self.caption = Gtk.Entry(width_chars=16)
+        self.caption.connect("activate", lambda *_: self.finish())
+        self.table_opts.pack_start(self.caption, True, True, 0)
+        box.pack_start(self.table_opts, False, False, 0)
+
+        # --- the grid ---
+        self.grid = Gtk.Grid(row_spacing=4, column_spacing=4)
+        self.grid.set_halign(Gtk.Align.CENTER)
+        box.pack_start(self.grid, False, False, 0)
+
+        hint = Gtk.Label()
+        hint.set_markup("<small>Tab: next cell · Enter: copy LaTeX · Esc: cancel</small>")
+        hint.get_style_context().add_class("dim-label")
+        box.pack_start(hint, False, False, 0)
+
+        self.rows.connect("value-changed", lambda *_: self.build_grid())
+        self.cols.connect("value-changed", lambda *_: self.build_grid())
+        self.rb_matrix.connect("toggled", lambda *_: self.set_mode())
+
+        if mode == "table":
+            self.rb_table.set_active(True)
+        self.rows.set_value(3 if mode == "table" else 2)
+        self.cols.set_value(3 if mode == "table" else 2)
+        self.build_grid()
+        self.show_all()
+        self.set_mode()
+
+    # ---------- layout ----------
+    def is_matrix(self):
+        return self.rb_matrix.get_active()
+
+    def set_mode(self):
+        self.matrix_opts.set_visible(self.is_matrix())
+        self.table_opts.set_visible(not self.is_matrix())
+        self.resize(1, 1)
+        self.focus_cell(0, 0)
+
+    def save_values(self):
+        for r, row in enumerate(self.entries):
+            for c, e in enumerate(row):
+                self.values[(r, c)] = e.get_text()
+
+    def build_grid(self):
+        self.save_values()
+        for child in self.grid.get_children():
+            self.grid.remove(child)
+        nr, nc = int(self.rows.get_value()), int(self.cols.get_value())
+        self.entries = []
+        for r in range(nr):
+            row = []
+            for c in range(nc):
+                e = Gtk.Entry(width_chars=6, xalign=0.5)
+                e.set_text(self.values.get((r, c), ""))
+                e.connect("key-press-event", self.on_cell_key, r, c)
+                e.connect("changed", self.on_cell_changed, r, c)
+                e.connect("activate", lambda *_: self.finish())
+                self.grid.attach(e, c, r, 1, 1)
+                row.append(e)
+            self.entries.append(row)
+        self.grid.show_all()
+        self.resize(1, 1)
+
+    def focus_cell(self, r, c):
+        if self.entries:
+            self.entries[r][c].grab_focus()
+
+    # ---------- input ----------
+    def on_cell_key(self, entry, event, r, c):
+        nr, nc = len(self.entries), len(self.entries[0])
+        idx = r * nc + c
+        if event.keyval == Gdk.KEY_Tab:
+            idx = (idx + 1) % (nr * nc)
+        elif event.keyval == Gdk.KEY_ISO_Left_Tab:
+            idx = (idx - 1) % (nr * nc)
+        elif event.keyval == Gdk.KEY_Down and r + 1 < nr:
+            idx += nc
+        elif event.keyval == Gdk.KEY_Up and r > 0:
+            idx -= nc
+        else:
+            return False
+        self.focus_cell(*divmod(idx, nc))
+        return True
+
+    def on_cell_changed(self, entry, r, c):
+        """A pasted block with tabs/newlines spreads over the grid from this cell."""
+        text = entry.get_text()
+        if self.filling or ("\t" not in text and "\n" not in text):
+            return
+        self.filling = True
+        block = parse_block(text)
+        # grow the grid first (this rebuilds the entries), then write the block in
+        self.rows.set_value(max(self.rows.get_value(), min(MAX, r + len(block))))
+        self.cols.set_value(max(self.cols.get_value(), min(MAX, c + len(block[0]))))
+        for dr, row in enumerate(block):
+            for dc, val in enumerate(row):
+                if r + dr < len(self.entries) and c + dc < len(self.entries[0]):
+                    self.entries[r + dr][c + dc].set_text(val)
+        self.save_values()
+        self.focus_cell(min(r + len(block), len(self.entries)) - 1, min(c + len(block[0]), len(self.entries[0])) - 1)
+        self.filling = False
+
+    def on_window_key(self, _w, event):
+        if event.keyval == Gdk.KEY_Escape:
+            Gtk.main_quit()
+            return True
+        return False
+
+    # ---------- output ----------
+    def finish(self):
+        rows = [[e.get_text() for e in row] for row in self.entries]
+        if self.is_matrix():
+            out = matrix_latex(rows, env=self.bracket.get_active_id())
+        else:
+            out = table_latex(rows, align=self.align.get_active_id(), caption=self.caption.get_text())
+        cb = Gtk.Clipboard.get(Gdk.SELECTION_CLIPBOARD)
+        cb.set_text(out, -1)
+        cb.store()
+        self.hide()
+        # X11 clipboards live in the owning process: stay alive, hidden, until
+        # something else takes the clipboard over (CopyQ usually does at once).
+        cb.connect("owner-change", lambda *_: GLib.timeout_add(200, self.quit_if_not_owner))
+        GLib.timeout_add_seconds(3600, Gtk.main_quit)
+
+    def quit_if_not_owner(self):
+        # A window of ours is returned only while this process owns the clipboard.
+        if Gdk.selection_owner_get(Gdk.SELECTION_CLIPBOARD) is None:
+            Gtk.main_quit()
+        return False
+
+
+def main():
+    mode = "table" if "--table" in sys.argv[1:] else "matrix"
+    win = Popup(mode)
+    win.present_with_time(Gdk.CURRENT_TIME)
+    Gtk.main()
+
+
+if __name__ == "__main__":
+    main()
